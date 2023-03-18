@@ -1,0 +1,268 @@
+---
+title: "True score MTMM model with ESS3 data"
+author: "DL Oberski"
+date: "September 27, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Ting asked me how the "true-score MTMM" model can be estimated in R. This post demonstrates that using ESS 3 data. 
+
+Download this Rmd and data used here: 
+
+ * http://daob.nl/files/mtmm-lavaan/TS_mtmm_ESS3.Rmd
+ * http://daob.nl/files/mtmm-lavaan/ESS3_merged.rdata
+
+## Theory
+
+First the theory.
+
+The TS-MTMM model was formulated by Saris & Andrews (1991). It is mathametically equivalent to the regular MTMM model. However, in contrast witht the regular MTMM, it directly yields estimates of the "true score reliability" and "true score validity". These are interesting because they, in turn connect with the theory of Lord & Novick (1969). In this theory, every survey answer has some expectation, which is called the "true score" (TS). So the "true score" is not _literally_ a true score ("Platonic true score" in Lord & Novick's terms), but just the expectation of the answer:
+$$
+\tau := E(y)
+$$
+and
+$$
+y := \tau + \epsilon
+$$
+Note that this is just a definition (hence the $:=$) and you can't really argue with it. The existence of the true score is not, repeat **not, an assumption**. 
+
+What the expectation might be over is a point of some contention. Most commonly, people ask you to imagine that you ask a question, wipe the person's memory, and "immediately" ask it again. That way, the second time the answer will be different purely due to "measurement error" (things that aren't interesting). So whatever you'd like to define as "measurement error" is what the expectation is over, and I'll leave it there. There is more in the Lord & Novick book and Denny Borsboom wrote an interesting dissertation on these concepts. 
+
+So anyway, 
+
+  Measurement error ($\epsilon$) is just defined as whatever the 
+  current answer's deviation is from the average answer I'd give.
+
+The TS might be biased, in the sense that each person will, for the same true stimulus, give a different answer: each person has a "response function" that determines how you respond _on average_ to a question compared with other people, _for the same underlying feeling_. For example, mine might be $\tau_{\text{Daniel}} = \eta + 1$ and yours  $\tau_{\text{Ting}} = \eta - 1$. That means I'm always biased upwards (by +1 relative to our average) and you downwards (by -1). We'll give different answers even though we had the same true underlying value, $\eta$. (The existence of an $\eta$ _is_ an assumption.) We'll call this personal bias $\xi$.
+
+Now, this personal bias might happen on more than one question. For example, Krosnick showed that if you ask people completely unrelated agree-disagree questions, some people tend to "agree" with all of them. Even if they're contradictory of have no content at all. So that shows that the _same $\xi$ operates on different $\tau$'s_:
+$$
+  y_1 = \tau_1 + \epsilon_1\\
+  \tau_1 = \eta_1 + \xi
+$$
+and
+$$
+  y_2 = \tau_2 + \epsilon_2\\
+  \tau_2 = \eta_2 + \xi
+$$
+Where the $\xi$ is the same (for example because they're both agree-disagree questions) but the $\eta$'s and $\tau$'s differ (because they're on different topics).
+
+Now back to "measurement error". We'd like to know $\eta$ but all we got was $y$. There are two reasons for that:
+
+ * Random measurement error $\epsilon$ and;
+ * Systematic (correlated) measurement error $\xi$.
+ 
+Actually the name "systematic" is extremely confusing here because most people use that term to mean "bias in the average". Here it does not mean that but rather "person-specific bias that's the same across questions". Another term for $\xi$ is "method factor" and $\eta$ is called the "trait factor".
+
+So now we're ready to see what is meant by "true score reliability" and "true score validity" (again a super-confusing term but bear with me):
+
+  * True score reliability is the (squared) correlation between the true score and the observed answer, $\text{cor}(\tau, y)$;
+  * True score validity is the (squared) correlation between trait and the true score,  $\text{cor}(\eta, \tau)$.
+ 
+To separate these, the most straightforward method is just to formulate the model above directly as a structural equation model, e.g. in `lavaan`. Note that $\tau$ is a "phantom" latent variable here: it is just defined as trait PLUS method, without any further residual (unique variance). If we copy that in the syntax, we'll get the right correlations back as standardized loadings. This is shown below.
+
+## Data
+
+I'm using the "enjoying life" items from ESS 3. The exact questions are in the main and supplementary questionnaire. 
+
+We'll use `tidyverse` to munge data and `lavaan` to fit models.
+
+```{r cars}
+library(tidyverse)
+library(lavaan)
+```
+
+```{r{}
+load("ESS3_merged.rdata")
+```
+
+First select the nine variables that form a part of the experiment. The experiment is also described in Melanie's paper.
+
+```{r}
+mtmm_sub <- ess3.mgd %>% 
+  select(idno, cntry, lrnnew, accdng, plprftr, testb7, testb8, testb9, testb19, testb20, testb21) %>%
+  filter(cntry == "NL")
+mtmm_sub <- mtmm_sub %>% mutate(idno = as.factor(idno)) %>% purrr::map_if(is.numeric, ~ .x - mean(.x, na.rm = TRUE)) %>% as_data_frame
+```
+
+I'm using only Dutch data here because the full dataset has a waiting time that's too long for my limited patience. But you're welcome to change this. 
+
+As an exploratory move, show the correlatiosn:
+
+```{r}
+mtmm_sub %>% select(-(1:2)) %>% cor(use = "pair") %>% round(2)
+```
+
+Note that some are `NA`, missing, because this is a split-ballot questionnaire: people only got the main questionnaire (version 1 of the questions) plus version 2 OR plus version 3. Nobody got both versions 2 and 3.
+
+
+## Models
+
+### Just traits model
+
+A basic sanity check is to forget about the MTMM for a moment and check that a reasonable factor model results from just letting each of the different versions of the same question load on a single factor. 
+
+```{r}
+trait_basic <- "
+  T1 =~ 1*lrnnew + testb7 + testb19
+  T2 =~ 1*accdng + testb8 + testb20
+  T3 =~ 1*plprftr+ testb9 + testb21
+"
+fit_trait_basic <- cfa(trait_basic, data = mtmm_sub, missing = "ml")
+summary(fit_trait_basic, standardized = TRUE)
+```
+
+Looks fine to me. Note the third method gives negative loadings because the question answer options are reversed. You can see this in the correlation matrix too. This is just SEM taking care of reverse coding automatically. We can generally ignore signs.
+
+(The 10% coverage warning is due to the missing correlations. It can also be safely ignored in this case.)
+
+### Run-of-the mill MTMM-1
+
+Below I show how to fit an MTMM that **not** a true-score MTMM. This is the standard thing most people do when they MTMM. I've left out the second method (so it's MTMM-1, see Eid 2000). 
+
+```{r}
+mtmm_basic <- "
+  T1 =~ lrnnew + testb7 + testb19
+  T2 =~ accdng + testb8 + testb20
+  T3 =~ plprftr+ testb9 + testb21
+
+  M1 =~ 1*lrnnew + 1*accdng + 1*plprftr
+  M3 =~ 1*testb19 + 1*testb20 + 1*testb21
+
+  T1~~1*T1
+  T2~~1*T2
+  T3~~1*T3
+
+  T1~~T2+T3 
+  T2~~T3
+"
+```
+
+```{r}
+fit_mtmm_basic <- lavaan(mtmm_basic, data = mtmm_sub, missing = "ml", 
+                         auto.fix.first = FALSE, auto.var = TRUE)
+summary(fit_mtmm_basic, standardized = TRUE)
+```
+
+### True score MTMM-1
+
+Here is the true-score MTMM model. The first part defines the observed variables as equal to true score (e.g. `lrnnew_TS =~ 1*lrnnew`), except for random error variance (e.g. `lrnnew~~lrnnew`). The second part defines each true score to exactly equal trait PLUS method. E.g. `T1 =~ lrnnew_TS` and ` M1 =~ 1*lrnnew_TS` and there's no further variance (`auto.var = FALSE` in the call below). The methods don't correlate but the traits do.
+
+```{r}
+mtmm_ts <- "
+  lrnnew_TS =~ 1*lrnnew
+  accdng_TS =~ 1*accdng
+  plprftr_TS =~ 1*plprftr
+  testb7_TS =~ 1*testb7
+  testb8_TS =~ 1*testb8
+  testb9_TS =~ 1*testb9
+  testb19_TS =~ 1*testb19
+  testb20_TS =~ 1*testb20
+  testb21_TS =~ 1*testb21
+
+  T1 =~ lrnnew_TS + testb7_TS + testb19_TS
+  T2 =~ accdng_TS + testb8_TS + testb20_TS
+  T3 =~ plprftr_TS + testb9_TS + testb21_TS
+
+  M1 =~ 1*lrnnew_TS + 1*accdng_TS + 1*plprftr_TS
+  M3 =~ 1*testb19_TS + 1*testb20_TS + 1*testb21_TS
+
+  lrnnew~~lrnnew
+  accdng~~accdng
+  plprftr~~plprftr
+  testb7 ~~testb7
+  testb8 ~~testb8
+  testb9 ~~testb9
+  testb19~~testb19
+  testb20~~testb20
+  testb21~~testb21
+
+  M1~~M1
+  M3~~M3
+
+  T1~~1*T1
+  T2~~1*T2
+  T3~~1*T3
+
+  T1~~T2+T3 
+  T2~~T3
+"
+
+fit_mtmm_ts <- lavaan(mtmm_ts, data = mtmm_sub, missing = "ml", 
+                         auto.fix.first = FALSE, auto.var = FALSE)
+```
+
+The model estimates are shown below. Note they're different than for the run-of-the-mill MTMM. But the model fit and df are the same, demonstrating mathematical equivalence: 
+```{r}
+fit_mtmm_ts
+fit_mtmm_basic
+```
+
+As per usual, the "true score validity" (don't get me started on this term) estimates are pretty high, e.g. 0.961 for `lrnnew` and 1 by definition for the second method, but the reliabilities are around 0.8, e.g. standardized `lrnnew_TS =~ lrnnew` is 0.769. This is typical in ESS. 
+
+```{r}
+summary(fit_mtmm_ts, standardized = TRUE)
+```
+
+The reliability coefficients, validity coefficients, and method effects are above and also here: 
+
+```{r}
+std_ts <- standardizedsolution(fit_mtmm_ts) %>% filter(op == "=~") %>% select(1:4)
+std_ts
+```
+
+```{r}
+std_basic <- standardizedsolution(fit_mtmm_basic) %>% 
+  filter(op == "=~") %>% select(1:4)
+std_basic
+```
+
+### Calculating standardized coefficients in one model from the other 
+
+The standardized coefficients of one model can be calculated from the other. For example, starting from the TS solution, we get the "basic" trait and method loadings by multiplying reliability with validity and method effect, respectively. Here's an example for the `lrnnew` variable (T1 and M1):
+
+```{r}
+reliability_coefficient <- std_ts$est.std[std_ts$rhs == "lrnnew"]
+
+val_and_met_coefficients <-  std_ts$est.std[std_ts$rhs == "lrnnew_TS"]
+
+reliability_coefficient * val_and_met_coefficients
+```
+
+This can be verified by looking at the standardized solution of the "basic" model directly:
+
+```{r}
+std_basic %>% filter(rhs == "lrnnew")
+```
+
+Note these are identical even though obtained from different models. 
+
+Of course, we can also reverse the calculations: starting from the "basic" solution, calculate the standardized coefficients of the TS model without actually estimating that model. Calling the standardized trait and method factor loading from the basic model $\lambda$ and $\gamma$ respectively, we have $\lambda = r \cdot v$, $\gamma = r \cdot m$, and since $\tau$ doesn't contain any unique variance, $m^2 + v^2 = 1$, implying that
+$$
+ r = \sqrt{\lambda^2 + \gamma^2},\\ 
+ v = \lambda / r, \text{and}\\ 
+ m = \gamma / r.
+$$
+
+```{r}
+basic_coefs <- std_basic %>% filter(rhs == "lrnnew") %>% .$est.std
+lambda <- basic_coefs[1]
+gamma <- basic_coefs[2]
+
+r <- sqrt(lambda^2 + gamma^2)
+v <- lambda / r
+m <- gamma / r
+
+
+c(r=r, v=v, m=m)
+```
+
+which are indeed identical to `reliability_coefficient` and `val_and_met_coefficients` obtained from the basic model:
+
+```{r}
+reliability_coefficient
+val_and_met_coefficients
+```

@@ -19,7 +19,8 @@ Download this Rmd and data used here:
 
 First the theory.
 
-The TS-MTMM model was formulated by Saris & Andrews (1991). It is mathametically equivalent to the regular MTMM model. However, in contrast witht the regular MTMM, it directly yields estimates of the "true score reliability" and "true score validity". These are interesting because they, in turn connect with the theory of Lord & Novick (1969). In this theory, every survey answer has some expectation, which is called the "true score" (TS). So the "true score" is not _literally_ a true score ("Platonic true score" in Lord & Novick's terms), but just the expectation of the answer:
+The TS-MTMM model was formulated by Saris & Andrews (1991). It is mathametically equivalent to the regular MTMM model. However, in contrast witthe the regular MTMM, it directly yields estimates of the "true score reliability" and "true score validity". These are interesting because they, in turn connect with the theory of Lord & Novick (1969). In this theory, every survey answer has some expectation, which is called the "true score" (TS). So the "true score" is not _literally_ a true score ("Platonic true score" in Lord & Novick's terms), but just the expectation of the answer:
+
 $$
 \tau := E(y)
 $$
